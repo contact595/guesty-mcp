@@ -51,8 +51,15 @@ async function guestyRequest(method, path, params = {}, body = null) {
     config.paramsSerializer = (p) => Object.entries(p).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
   }
   if (body) { config.data = body; config.headers["Content-Type"] = "application/json"; }
-  const res = await axios(config);
-  return res.data;
+  try {
+    const res = await axios(config);
+    return res.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const detail = JSON.stringify(err.response?.data || err.message);
+    console.error(`[Guesty Error] ${method} ${path} => ${status}: ${detail}`);
+    throw err;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -244,9 +251,14 @@ function buildMcpServer() {
   server.tool("get_conversation", "Get the message thread for a reservation",
     { reservation_id: z.string() },
     async ({ reservation_id }) => {
-      const list = await guestyRequest("GET", "/conversations", { reservationId: reservation_id, limit: 1 });
-      const conversation = (list.results || list)[0];
-      if (!conversation) return { content: [{ type: "text", text: JSON.stringify({ error: "No conversation found for this reservation" }) }] };
+      const list = await guestyRequest("GET", "/conversations", { reservationId: reservation_id, limit: 10 });
+      console.log(`[get_conversation] raw response keys:`, Object.keys(list), `count:`, (list.results||list).length);
+      let results = list.results || list;
+      if (Array.isArray(results)) {
+        results = results.filter(c => c.reservationId === reservation_id || c.reservation?._id === reservation_id);
+      }
+      const conversation = Array.isArray(results) ? results[0] : null;
+      if (!conversation) return { content: [{ type: "text", text: JSON.stringify({ error: "No conversation found", debug: { reservation_id, rawCount: (list.results||list).length } }) }] };
       const data = await guestyRequest("GET", `/conversations/${conversation._id}`);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
