@@ -176,7 +176,9 @@ function buildMcpServer() {
       const params = { limit, skip, sort: "_id" };
       if (filters.length) params.filters = JSON.stringify(filters);
       const data = await guestyRequest("GET", "/reservations", params);
-      const out = (data.results || data).map(r => ({
+      let results = data.results || data;
+if (listing_id) results = results.filter(r => r.listingId === listing_id);
+const out = results.map(r => ({
         id: r._id, confirmationCode: r.confirmationCode, status: r.status,
         checkIn: r.checkIn, checkOut: r.checkOut, listingId: r.listingId,
         guestName: r.guest?.fullName, totalPaid: r.money?.totalPaid,
