@@ -102,13 +102,14 @@ app.post("/register", (req, res) => {
   });
 });
 
-// 4. Authorization Endpoint - Shows auto-approve consent page
+// 4. Authorization Endpoint - Auto-approves and redirects immediately
 app.get("/authorize", (req, res) => {
-  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, response_type } = req.query;
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method } = req.query;
 
   if (!client_id) return res.status(400).send("Missing client_id");
+  if (!redirect_uri) return res.status(400).send("Missing redirect_uri");
 
-  // Generate auth code
+  // Generate auth code and store it
   const code = crypto.randomBytes(16).toString("hex");
   authCodes[code] = {
     client_id,
@@ -118,102 +119,20 @@ app.get("/authorize", (req, res) => {
     created_at: Date.now(),
   };
 
-  // Auto-approve consent page (single-user server - you are the only user)
-  res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Guesty MCP – Connect to Claude</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f5f5f5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      padding: 20px;
-    }
-    .card {
-      background: white;
-      border-radius: 12px;
-      padding: 40px;
-      max-width: 440px;
-      width: 100%;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-      text-align: center;
-    }
-    .logo { font-size: 40px; margin-bottom: 16px; }
-    h1 { font-size: 22px; color: #111; margin-bottom: 8px; }
-    p { color: #666; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-    .scopes {
-      background: #f9f9f9;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      text-align: left;
-    }
-    .scope-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 13px;
-      color: #444;
-      padding: 4px 0;
-    }
-    .scope-item::before { content: "✓"; color: #22c55e; font-weight: bold; }
-    .btn {
-      display: block;
-      width: 100%;
-      padding: 14px;
-      background: #2563eb;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      text-decoration: none;
-      transition: background 0.2s;
-    }
-    .btn:hover { background: #1d4ed8; }
-    .powered { margin-top: 20px; font-size: 12px; color: #999; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">🏠</div>
-    <h1>Connect Guesty to Claude</h1>
-    <p>Claude is requesting access to your Guesty account for Ventur Group. Click below to authorize.</p>
-    <div class="scopes">
-      <div class="scope-item">View listings and properties</div>
-      <div class="scope-item">Read and manage reservations</div>
-      <div class="scope-item">Access guest information</div>
-      <div class="scope-item">Send messages via inbox</div>
-      <div class="scope-item">View availability and financials</div>
-    </div>
-    <a class="btn" href="/authorize/approve?code=${code}&redirect_uri=${encodeURIComponent(redirect_uri)}&state=${encodeURIComponent(state || "")}">
-      Authorize Access
-    </a>
-    <div class="powered">Guesty MCP • Ventur Group</div>
-  </div>
-</body>
-</html>`);
-});
+  console.log(`[OAuth] Auto-approving auth code for client: ${client_id}`);
 
-// 5. Approval redirect - sends code back to Claude
-app.get("/authorize/approve", (req, res) => {
-  const { code, redirect_uri, state } = req.query;
-  if (!code || !authCodes[code]) return res.status(400).send("Invalid or expired authorization code");
-
-  const redirectUrl = new URL(redirect_uri);
-  redirectUrl.searchParams.set("code", code);
-  if (state) redirectUrl.searchParams.set("state", state);
-
-  console.log(`[OAuth] Approved, redirecting to: ${redirectUrl.toString()}`);
-  res.redirect(redirectUrl.toString());
+  // Auto-redirect immediately back to Claude with the code
+  // No user click required — this is a single-user private server
+  try {
+    const redirectUrl = new URL(redirect_uri);
+    redirectUrl.searchParams.set("code", code);
+    if (state) redirectUrl.searchParams.set("state", state);
+    console.log(`[OAuth] Redirecting to: ${redirectUrl.toString()}`);
+    res.redirect(redirectUrl.toString());
+  } catch (err) {
+    console.error(`[OAuth] Invalid redirect_uri: ${redirect_uri}`, err);
+    res.status(400).send("Invalid redirect_uri");
+  }
 });
 
 // 6. Token Endpoint - exchanges code for access token
