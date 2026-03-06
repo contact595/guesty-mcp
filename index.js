@@ -249,46 +249,30 @@ function buildMcpServer() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Streamable HTTP MCP Endpoint
-// Key fix: create transport ONCE, connect server ONCE, reuse for all requests
-// Pass req.body as third arg to handleRequest
+// Streamable HTTP MCP Endpoint — stateless mode
+// New transport per request (required for stateless), shared McpServer instance
 // ═══════════════════════════════════════════════════════════════════════════
 const mcpServer = buildMcpServer();
-const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
 
-// Connect once at startup
-mcpServer.connect(mcpTransport).then(() => {
-  console.log("MCP server connected to transport");
-}).catch(err => {
-  console.error("Failed to connect MCP server:", err);
-});
-
-app.post("/mcp", async (req, res) => {
+async function handleMcpRequest(req, res) {
   try {
-    await mcpTransport.handleRequest(req, res, req.body);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless — no session tracking
+    });
+    // Connect server to this request's transport, handle, then close
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    res.on("finish", () => transport.close());
+    res.on("close", () => transport.close());
   } catch (err) {
-    console.error("[MCP POST error]", err);
+    console.error("[MCP error]", err);
     if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
   }
-});
+}
 
-app.get("/mcp", async (req, res) => {
-  try {
-    await mcpTransport.handleRequest(req, res, req.body);
-  } catch (err) {
-    console.error("[MCP GET error]", err);
-    if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-app.delete("/mcp", async (req, res) => {
-  try {
-    await mcpTransport.handleRequest(req, res, req.body);
-  } catch (err) {
-    console.error("[MCP DELETE error]", err);
-    if (!res.headersSent) res.status(500).json({ error: "Internal server error" });
-  }
-});
+app.post("/mcp", handleMcpRequest);
+app.get("/mcp", handleMcpRequest);
+app.delete("/mcp", handleMcpRequest);
 
 // ─── Health ──────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
