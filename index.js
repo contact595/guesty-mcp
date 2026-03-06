@@ -47,9 +47,9 @@ async function guestyRequest(method, path, params = {}, body = null) {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   };
   if (method === "GET" && Object.keys(params).length) {
-  config.params = params;
-  config.paramsSerializer = (p) => Object.entries(p).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
-}
+    config.params = params;
+    config.paramsSerializer = (p) => Object.entries(p).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+  }
   if (body) { config.data = body; config.headers["Content-Type"] = "application/json"; }
   const res = await axios(config);
   return res.data;
@@ -177,8 +177,8 @@ function buildMcpServer() {
       if (filters.length) params.filters = JSON.stringify(filters);
       const data = await guestyRequest("GET", "/reservations", params);
       let results = data.results || data;
-if (listing_id) results = results.filter(r => r.listingId === listing_id);
-const out = results.map(r => ({
+      if (listing_id) results = results.filter(r => r.listingId === listing_id);
+      const out = results.map(r => ({
         id: r._id, confirmationCode: r.confirmationCode, status: r.status,
         checkIn: r.checkIn, checkOut: r.checkOut, listingId: r.listingId,
         guestName: r.guest?.fullName, totalPaid: r.money?.totalPaid,
@@ -228,18 +228,26 @@ const out = results.map(r => ({
     }
   );
 
+  // ── FIXED: look up conversation by reservationId first, then send message ──
   server.tool("send_guest_message", "Send a message to a guest via Guesty inbox",
     { reservation_id: z.string(), message: z.string() },
     async ({ reservation_id, message }) => {
-      const data = await guestyRequest("POST", `/conversations/${reservation_id}/messages`, {}, { body: message, type: "host" });
+      const list = await guestyRequest("GET", "/conversations", { reservationId: reservation_id, limit: 1 });
+      const conversation = (list.results || list)[0];
+      if (!conversation) throw new Error("No conversation found for this reservation");
+      const data = await guestyRequest("POST", `/conversations/${conversation._id}/messages`, {}, { body: message, type: "host" });
       return { content: [{ type: "text", text: JSON.stringify({ success: true, messageId: data._id }) }] };
     }
   );
 
+  // ── FIXED: look up conversation by reservationId first, then fetch full thread ──
   server.tool("get_conversation", "Get the message thread for a reservation",
     { reservation_id: z.string() },
     async ({ reservation_id }) => {
-      const data = await guestyRequest("GET", `/conversations/${reservation_id}`);
+      const list = await guestyRequest("GET", "/conversations", { reservationId: reservation_id, limit: 1 });
+      const conversation = (list.results || list)[0];
+      if (!conversation) return { content: [{ type: "text", text: JSON.stringify({ error: "No conversation found for this reservation" }) }] };
+      const data = await guestyRequest("GET", `/conversations/${conversation._id}`);
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     }
   );
@@ -266,7 +274,6 @@ async function handleMcpRequest(req, res) {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined, // stateless — no session tracking
     });
-    // Connect server to this request's transport, handle, then close
     await mcpServer.connect(transport);
     await transport.handleRequest(req, res, req.body);
     res.on("finish", () => transport.close());
