@@ -334,7 +334,7 @@ function createMcpServer() {
 // ═══════════════════════════════════════════════════════════════════════════
 const transports = {};
 
-app.get("/sse", validateToken, async (req, res) => {
+app.get("/sse", async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   transports[transport.sessionId] = transport;
   res.on("close", () => delete transports[transport.sessionId]);
@@ -342,7 +342,7 @@ app.get("/sse", validateToken, async (req, res) => {
   await server.connect(transport);
 });
 
-app.post("/messages", validateToken, async (req, res) => {
+app.post("/messages", async (req, res) => {
   const sessionId = req.query.sessionId;
   const transport = transports[sessionId];
   if (!transport) return res.status(404).send("Session not found");
