@@ -166,10 +166,10 @@ function buildMcpServer() {
     },
     async ({ listing_id, status, check_in_from, check_in_to, limit, skip }) => {
       const params = { limit, skip };
-      if (listing_id) params.listingId = listing_id;
+      if (listing_id) params['filters[listingId][$in][0]'] = listing_id;
       if (status) params.status = status;
-      if (check_in_from) params.checkInDateFrom = check_in_from;
-      if (check_in_to) params.checkInDateTo = check_in_to;
+      if (check_in_from) params['checkIn[$gte]'] = check_in_from;
+      if (check_in_to) params['checkIn[$lte]'] = check_in_to;
       const data = await guestyRequest("GET", "/reservations", params);
       const out = (data.results || data).map(r => ({
         id: r._id, confirmationCode: r.confirmationCode, status: r.status,
