@@ -166,8 +166,10 @@ async function getConversationPosts(conversation_id) {
   return data.posts || data.data?.posts || data.results || (Array.isArray(data) ? data : []);
 }
 
-// ── MCP Server ────────────────────────────────────────────────────────────────
-const server = new McpServer({ name: "guesty-mcp", version: "1.0.0" });
+// ── MCP Tool Registration ─────────────────────────────────────────────────────
+// Called for every request to create a fresh server instance (stateless HTTP)
+function createMcpServer() {
+  const server = new McpServer({ name: "guesty-mcp", version: "1.0.0" });
 
 // list_listings
 server.tool("list_listings", "Get all Guesty property listings for Ventur Group", {
@@ -343,6 +345,9 @@ server.tool("get_availability_calendar", "Get availability calendar for a listin
   return { content: [{ type: "text", text: JSON.stringify(data) }] };
 });
 
+  return server;
+}
+
 // ── Webhook handler ───────────────────────────────────────────────────────────
 function handleWebhookEvent(payload) {
   try {
@@ -390,11 +395,12 @@ app.post("/webhook", (req, res) => {
   res.sendStatus(200);
 });
 
-// SSE transport
+// SSE transport — new server per connection
 const sseTransports = {};
 app.get("/sse", async (req, res) => {
   const transport = new SSEServerTransport("/messages", res);
   sseTransports[transport.sessionId] = transport;
+  const server = createMcpServer();
   await server.connect(transport);
 });
 app.post("/messages", async (req, res) => {
@@ -403,13 +409,13 @@ app.post("/messages", async (req, res) => {
   await transport.handlePostMessage(req, res, req.body);
 });
 
-// StreamableHTTP transport — stateless mode (new transport per request, no session)
-const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-await server.connect(mcpTransport);
-
+// StreamableHTTP transport — new server + transport per request (stateless)
 app.post("/mcp", async (req, res) => {
   try {
-    await mcpTransport.handleRequest(req, res, req.body);
+    const server = createMcpServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
@@ -417,7 +423,10 @@ app.post("/mcp", async (req, res) => {
 
 app.get("/mcp", async (req, res) => {
   try {
-    await mcpTransport.handleRequest(req, res);
+    const server = createMcpServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res);
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
