@@ -1,6 +1,5 @@
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 const GUESTY_API = "https://open-api.guesty.com/v1";
@@ -395,44 +394,31 @@ app.post("/webhook", (req, res) => {
   res.sendStatus(200);
 });
 
-// SSE transport — new server per connection
+// SSE transport — used for both /sse and /mcp endpoints
 const sseTransports = {};
-app.get("/sse", async (req, res) => {
-  const transport = new SSEServerTransport("/messages", res);
-  sseTransports[transport.sessionId] = transport;
-  const server = createMcpServer();
-  await server.connect(transport);
-});
-app.post("/messages", async (req, res) => {
+
+function sseHandler(postPath) {
+  return async (req, res) => {
+    const transport = new SSEServerTransport(postPath, res);
+    sseTransports[transport.sessionId] = transport;
+    const srv = createMcpServer();
+    await srv.connect(transport);
+  };
+}
+
+async function messageHandler(req, res) {
   const transport = sseTransports[req.query.sessionId];
   if (!transport) return res.status(404).json({ error: "Session not found" });
   await transport.handlePostMessage(req, res, req.body);
-});
+}
 
-// StreamableHTTP transport — new server + transport per request (stateless)
-app.post("/mcp", async (req, res) => {
-  try {
-    const server = createMcpServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
-  } catch (e) {
-    if (!res.headersSent) res.status(500).json({ error: e.message });
-  }
-});
+// /sse + /messages (original SSE endpoints)
+app.get("/sse", sseHandler("/messages"));
+app.post("/messages", messageHandler);
 
-app.get("/mcp", async (req, res) => {
-  try {
-    const server = createMcpServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
-  } catch (e) {
-    if (!res.headersSent) res.status(500).json({ error: e.message });
-  }
-});
-
-app.delete("/mcp", (req, res) => res.status(200).end());
+// /mcp as SSE (Claude connector points here)
+app.get("/mcp", sseHandler("/mcp/messages"));
+app.post("/mcp/messages", messageHandler);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Guesty MCP running on port ${PORT}`));
