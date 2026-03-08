@@ -403,16 +403,27 @@ app.post("/messages", async (req, res) => {
   await transport.handlePostMessage(req, res, req.body);
 });
 
-// StreamableHTTP transport
-app.all("/mcp", async (req, res) => {
+// StreamableHTTP transport — stateless mode (new transport per request, no session)
+const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+await server.connect(mcpTransport);
+
+app.post("/mcp", async (req, res) => {
   try {
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
+    await mcpTransport.handleRequest(req, res, req.body);
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: e.message });
   }
 });
+
+app.get("/mcp", async (req, res) => {
+  try {
+    await mcpTransport.handleRequest(req, res);
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/mcp", (req, res) => res.status(200).end());
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Guesty MCP running on port ${PORT}`));
