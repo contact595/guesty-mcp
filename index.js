@@ -360,6 +360,30 @@ app.delete("/mcp", handleMcpRequest);
 app.get("/health", (req, res) => {
   res.json({ status: "ok", service: "guesty-mcp", version: "4.0.0", transport: "streamable-http" });
 });
+app.get('/test', async (req, res) => {
+  const { reservation_id } = req.query;
+  if (!reservation_id) return res.json({ error: "Pass ?reservation_id=YOUR_ID" });
+  try {
+    // Strategy 1: filters array
+    const s1 = await guestyRequest("GET", "/communication/conversations", {
+      filters: JSON.stringify([{ field: "reservationId", operator: "$eq", value: reservation_id }]),
+      limit: 5
+    }).catch(e => ({ error: e.response?.status, detail: e.response?.data }));
+
+    // Strategy 2: plain param
+    const s2 = await guestyRequest("GET", "/communication/conversations", {
+      reservationId: reservation_id, limit: 5
+    }).catch(e => ({ error: e.response?.status, detail: e.response?.data }));
+
+    // Strategy 3: no filter, raw list
+    const s3 = await guestyRequest("GET", "/communication/conversations", { limit: 10 })
+      .catch(e => ({ error: e.response?.status, detail: e.response?.data }));
+
+    res.json({ reservation_id, strategy1: s1, strategy2: s2, strategy3_sample: s3 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
