@@ -1,5 +1,6 @@
 import express from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 const GUESTY_API = "https://open-api.guesty.com/v1";
@@ -389,36 +390,83 @@ app.get("/test", async (req, res) => {
   res.json({ reservation_id, conversation_id: convoId, cacheSize: conversationCache.size });
 });
 
+app.get("/health", async (req, res) => {
+  const clientId = process.env.GUESTY_CLIENT_ID;
+  const clientSecret = process.env.GUESTY_CLIENT_SECRET;
+  const envStatus = {
+    GUESTY_CLIENT_ID: clientId ? `set (${clientId.slice(0,8)}...)` : "MISSING",
+    GUESTY_CLIENT_SECRET: clientSecret ? `set (length=${clientSecret.length})` : "MISSING",
+  };
+  let tokenTest = null;
+  try {
+    const r = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ grant_type: "client_credentials", scope: "open-api", client_id: clientId, client_secret: clientSecret }),
+    });
+    const d = await r.json();
+    tokenTest = r.ok ? `OK (token length=${d.access_token?.length})` : `FAILED ${r.status}: ${JSON.stringify(d)}`;
+  } catch (e) {
+    tokenTest = `FETCH ERROR: ${e.message}`;
+  }
+  res.json({ env: envStatus, tokenTest, cacheReady, cacheSize: conversationCache.size });
+});
+
 app.post("/webhook", (req, res) => {
   handleWebhookEvent(req.body);
   res.sendStatus(200);
 });
 
-// SSE transport — used for both /sse and /mcp endpoints
+// SSE transport (legacy /sse endpoint)
 const sseTransports = {};
-
-function sseHandler(postPath) {
-  return async (req, res) => {
-    const transport = new SSEServerTransport(postPath, res);
-    sseTransports[transport.sessionId] = transport;
-    const srv = createMcpServer();
-    await srv.connect(transport);
-  };
-}
-
-async function messageHandler(req, res) {
+app.get("/sse", async (req, res) => {
+  const transport = new SSEServerTransport("/messages", res);
+  sseTransports[transport.sessionId] = transport;
+  const srv = createMcpServer();
+  await srv.connect(transport);
+});
+app.post("/messages", async (req, res) => {
   const transport = sseTransports[req.query.sessionId];
   if (!transport) return res.status(404).json({ error: "Session not found" });
   await transport.handlePostMessage(req, res, req.body);
-}
+});
 
-// /sse + /messages (original SSE endpoints)
-app.get("/sse", sseHandler("/messages"));
-app.post("/messages", messageHandler);
+// StreamableHTTP transport — stateless, new server+transport per request
+app.post("/mcp", async (req, res) => {
+  try {
+    const srv = createMcpServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await srv.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+    res.on("finish", () => srv.close().catch(() => {}));
+  } catch (e) {
+    console.error("MCP POST error:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
 
-// /mcp as SSE (Claude connector points here)
-app.get("/mcp", sseHandler("/mcp/messages"));
-app.post("/mcp/messages", messageHandler);
+app.get("/mcp", async (req, res) => {
+  try {
+    const srv = createMcpServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    await srv.connect(transport);
+    await transport.handleRequest(req, res);
+    res.on("finish", () => srv.close().catch(() => {}));
+  } catch (e) {
+    console.error("MCP GET error:", e.message);
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete("/mcp", (req, res) => res.status(200).end());
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Guesty MCP running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Guesty MCP running on port ${PORT}`);
+  console.log(`GUESTY_CLIENT_ID set: ${!!process.env.GUESTY_CLIENT_ID}`);
+  console.log(`GUESTY_CLIENT_SECRET set: ${!!process.env.GUESTY_CLIENT_SECRET}`);
+});
