@@ -99,36 +99,18 @@ function indexConversation(convo) {
 async function buildConversationCache() {
   if (cacheBuilding) return;
   cacheBuilding = true;
-  console.log("[Cache] Starting bulk conversation sync...");
-
-  let cursor = null;
-  let page = 0;
-  let total = 0;
+  console.log("[Cache] Starting conversation sync (most recent 100)...");
 
   try {
-    while (true) {
-      const params = { limit: 100 };
-      if (cursor) params["cursor[after]"] = cursor;
+    // Fetch most recent 100 conversations — covers all active guests
+    const list = await guestyRequest("GET", "/communication/conversations", { limit: 100 });
+    const data = list.data || list;
+    const conversations = data.conversations || data.results || [];
 
-      const list = await guestyRequest("GET", "/communication/conversations", params);
-      const data = list.data || list;
-      const conversations = data.conversations || data.results || [];
-
-      if (!Array.isArray(conversations) || conversations.length === 0) break;
-
-      conversations.forEach(indexConversation);
-      total += conversations.length;
-
-      cursor = data.cursor?.after;
-      if (!cursor) break;
-
-      page++;
-      console.log(`[Cache] Synced page ${page} (${total} conversations so far)...`);
-      await sleep(500); // respectful pacing — 2 req/sec
-    }
+    conversations.forEach(indexConversation);
 
     cacheReady = true;
-    console.log(`[Cache] ✅ Ready — indexed ${total} conversations, ${conversationCache.size} reservations mapped`);
+    console.log(`[Cache] ✅ Ready — indexed ${conversations.length} conversations, ${conversationCache.size} reservations mapped`);
   } catch (err) {
     console.error("[Cache] ❌ Build failed:", err.message);
   } finally {
