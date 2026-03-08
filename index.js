@@ -108,7 +108,7 @@ async function buildConversationCache() {
   try {
     while (true) {
       const params = { limit: 100 };
-      if (cursor) params.cursor = cursor;
+      if (cursor) params["cursor[after]"] = cursor;
 
       const list = await guestyRequest("GET", "/communication/conversations", params);
       const data = list.data || list;
