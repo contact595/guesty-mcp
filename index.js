@@ -8,10 +8,33 @@ const GUESTY_API = "https://open-api.guesty.com/v1";
 const TOKEN_URL = "https://open-api.guesty.com/oauth2/token";
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-// Token persisted in env so it survives Render cold starts
-// GUESTY_CACHED_TOKEN and GUESTY_TOKEN_EXPIRY are set at runtime (in-memory across requests)
-let cachedToken = process.env.GUESTY_CACHED_TOKEN || null;
-let tokenExpiry = parseInt(process.env.GUESTY_TOKEN_EXPIRY || "0");
+const TOKEN_FILE = "/tmp/guesty_token.json";
+
+// Load token from disk on startup — survives Render cold starts
+let cachedToken = null;
+let tokenExpiry = 0;
+try {
+  if (fs.existsSync(TOKEN_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(TOKEN_FILE, "utf8"));
+    if (saved.token && saved.expiry && Date.now() < saved.expiry) {
+      cachedToken = saved.token;
+      tokenExpiry = saved.expiry;
+      console.log("Auth: loaded valid token from disk, expires in", Math.round((tokenExpiry - Date.now()) / 1000), "s");
+    } else {
+      console.log("Auth: disk token expired, will re-auth on first request");
+    }
+  }
+} catch (e) {
+  console.warn("Auth: could not load token from disk:", e.message);
+}
+
+function saveTokenToDisk() {
+  try {
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token: cachedToken, expiry: tokenExpiry }));
+  } catch (e) {
+    console.warn("Auth: could not save token to disk:", e.message);
+  }
+}
 
 // Mutex: only one auth call in-flight at a time — prevents cold-start stampede
 let tokenRefreshPromise = null;
@@ -76,6 +99,7 @@ async function _refreshToken() {
   cachedToken = data.access_token;
   tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
   console.log("getToken: NEW token obtained, expires in", data.expires_in, "s");
+  saveTokenToDisk();
   return cachedToken;
 }
 
@@ -578,6 +602,7 @@ app.get("/health", (req, res) => {
       cached: !!cachedToken,
       expiresIn: cachedToken ? Math.round((tokenExpiry - now) / 1000) + "s" : "no token",
       refreshInProgress: !!tokenRefreshPromise,
+      diskExists: fs.existsSync(TOKEN_FILE),
     },
     cache: {
       ready: cacheReady,
