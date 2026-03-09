@@ -281,10 +281,9 @@ server.tool("list_reservations", "Get reservations with optional filters by list
   skip: z.number().default(0),
 }, async ({ listing_id, status, check_in_from, check_in_to, limit, skip }) => {
   const params = { limit: Math.min(limit * 3, 100), skip };
-if (listing_id) params.listingId = listing_id;
-if (status) params.status = status;
-if (check_in_from) params["checkIn[from]"] = check_in_from;
-if (check_in_to) params["checkIn[to]"] = check_in_to;
+  if (status) params.status = status;
+  if (check_in_from) params["checkIn[from]"] = check_in_from;
+  if (check_in_to) params["checkIn[to]"] = check_in_to;
 
   const data = await guestyRequest("GET", "/reservations", params);
   let reservations = data.results || data.reservations || data.data?.results || [];
