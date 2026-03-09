@@ -563,26 +563,29 @@ app.get("/test", async (req, res) => {
   res.json({ reservation_id, conversation_id: convoId, cacheSize: conversationCache.size });
 });
 
-app.get("/health", async (req, res) => {
+// Passive health check — never triggers a Guesty auth call
+// Reports cached state only to avoid hammering the auth endpoint
+app.get("/health", (req, res) => {
   const clientId = process.env.GUESTY_CLIENT_ID;
   const clientSecret = process.env.GUESTY_CLIENT_SECRET;
-  let tokenTest = null;
-  try {
-    const token = await getToken();
-    tokenTest = token ? `OK (token length=${token.length})` : "No token returned";
-  } catch (e) {
-    tokenTest = `ERROR: ${e.message}`;
-  }
+  const now = Date.now();
   res.json({
     env: {
       GUESTY_CLIENT_ID: clientId ? `set (${clientId.slice(0,8)}...)` : "MISSING",
       GUESTY_CLIENT_SECRET: clientSecret ? `set (length=${clientSecret.length})` : "MISSING",
     },
-    tokenTest,
-    cacheReady,
-    cacheSize: conversationCache.size,
-    warmedListings: warmListingCache.size,
-    diskCacheExists: fs.existsSync(CACHE_FILE),
+    token: {
+      cached: !!cachedToken,
+      expiresIn: cachedToken ? Math.round((tokenExpiry - now) / 1000) + "s" : "no token",
+      refreshInProgress: !!tokenRefreshPromise,
+    },
+    cache: {
+      ready: cacheReady,
+      size: conversationCache.size,
+      error: cacheError || null,
+      warmedListings: warmListingCache.size,
+      diskExists: fs.existsSync(CACHE_FILE),
+    },
     uptime: Math.round(process.uptime())
   });
 });
